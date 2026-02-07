@@ -80,18 +80,39 @@ export async function loadProperties(): Promise<Property[]> {
  * Save new properties to Supabase
  * Uses UPSERT to handle duplicates based on the 'link' unique constraint
  */
+/**
+ * Save new properties to Supabase
+ * Use a transaction-like approach:
+ * 1. Mark ALL existing properties as old (isNew = false)
+ * 2. Upsert the incoming batch (new ones will be isNew = true)
+ */
 export async function saveProperties(properties: Property[]): Promise<void> {
     if (properties.length === 0) return;
 
     try {
-        // Map to DB column format (lowercase)
-        const dbRows = properties.map(mapToDb);
+        // Step 1: Reset 'isNew' for all existing records
+        // This ensures previous 'NEW' items are no longer marked as new
+        const { error: resetError } = await (supabase as any)
+            .from('properties')
+            .update({ isnew: false })
+            .eq('isnew', true); // Only update those that are currently true
+
+        if (resetError) {
+            console.error('Error resetting old properties status:', resetError);
+        }
+
+        // Ste 2: Map to DB column format (lowercase)
+        // Ensure incoming properties are set to isNew = true
+        const dbRows = properties.map(p => ({
+            ...mapToDb(p),
+            isnew: true // Explicitly set true for the current batch being processed
+        }));
 
         const { error } = await (supabase as any)
             .from('properties')
             .upsert(dbRows, {
                 onConflict: 'link',
-                ignoreDuplicates: true
+                ignoreDuplicates: true // Only insert if link doesn't exist
             });
 
         if (error) {
