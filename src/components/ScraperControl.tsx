@@ -9,7 +9,7 @@ interface ScraperControlProps {
 
 const ScraperControl: React.FC<ScraperControlProps> = ({ isLoading, onStart, lastRun }) => {
     return (
-        <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem', textAlign: 'center' }}>
+        <div className="glass-panel" style={{ padding: '2rem', marginBottom: '2rem', textAlign: 'center', maxWidth: '800px', margin: '0 auto 2rem auto' }}>
             <h2 style={{ marginBottom: '1rem' }}>Start Data Collection</h2>
             <p style={{ marginBottom: '2rem', color: 'var(--secondary-color)' }}>
                 Trigger the n8n workflow to scrape data from 99acres and VitalSpace simultaneously.
