@@ -8,6 +8,52 @@ export interface StoredData {
 }
 
 /**
+ * Helper to map DB row (lowercase) to Property object (camelCase)
+ */
+function mapFromDb(row: any): Property {
+    return {
+        propertyName: row.propertyname || row.propertyName, // Handle both just in case
+        price: row.price,
+        bhk: row.bhk,
+        locality: row.locality,
+        area: row.area,
+        developer: row.developer,
+        status: row.status,
+        regDate: row.regdate || row.regDate,
+        link: row.link,
+        propertyType: row.propertytype || row.propertyType,
+        city: row.city,
+        furnishing: row.furnishing,
+        fomo: row.fomo,
+        source: row.source,
+        isNew: row.isnew ?? row.isNew ?? true // DB might be isnew
+    };
+}
+
+/**
+ * Helper to map Property object (camelCase) to DB row (lowercase)
+ */
+function mapToDb(prop: Property): any {
+    return {
+        propertyname: prop.propertyName,
+        price: prop.price,
+        bhk: prop.bhk,
+        locality: prop.locality,
+        area: prop.area,
+        developer: prop.developer,
+        status: prop.status,
+        regdate: prop.regDate,
+        link: prop.link,
+        propertytype: prop.propertyType,
+        city: prop.city,
+        furnishing: prop.furnishing,
+        fomo: prop.fomo,
+        source: prop.source,
+        isnew: prop.isNew
+    };
+}
+
+/**
  * Load properties from Supabase
  * Returns the list of properties ordered by created_at descending
  */
@@ -23,7 +69,7 @@ export async function loadProperties(): Promise<Property[]> {
             return [];
         }
 
-        return (data as Property[]) || [];
+        return (data || []).map(mapFromDb);
     } catch (error) {
         console.error('Unexpected error fetching properties:', error);
         return [];
@@ -38,9 +84,12 @@ export async function saveProperties(properties: Property[]): Promise<void> {
     if (properties.length === 0) return;
 
     try {
+        // Map to DB column format (lowercase)
+        const dbRows = properties.map(mapToDb);
+
         const { error } = await (supabase as any)
             .from('properties')
-            .upsert(properties, {
+            .upsert(dbRows, {
                 onConflict: 'link',
                 ignoreDuplicates: true
             });
