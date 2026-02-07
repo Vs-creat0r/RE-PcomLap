@@ -1,6 +1,6 @@
-import type { Property } from '../types';
 
-const STORAGE_KEY = 'real-estate-properties';
+import { supabase } from './supabaseClient';
+import type { Property } from '../types';
 
 export interface StoredData {
     properties: Property[];
@@ -8,78 +8,78 @@ export interface StoredData {
 }
 
 /**
- * Generate a unique key for a property based on link + price
+ * Load properties from Supabase
+ * Returns the list of properties ordered by created_at descending
  */
-function getPropertyKey(property: Property): string {
-    return `${property.link || ''}-${property.price || ''}`;
+export async function loadProperties(): Promise<Property[]> {
+    try {
+        const { data, error } = await supabase
+            .from('properties')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching properties from Supabase:', error);
+            return [];
+        }
+
+        return (data as Property[]) || [];
+    } catch (error) {
+        console.error('Unexpected error fetching properties:', error);
+        return [];
+    }
 }
 
 /**
- * Load stored properties from localStorage
+ * Save new properties to Supabase
+ * Uses UPSERT to handle duplicates based on the 'link' unique constraint
  */
-export function loadProperties(): StoredData | null {
+export async function saveProperties(properties: Property[]): Promise<void> {
+    if (properties.length === 0) return;
+
     try {
-        const data = localStorage.getItem(STORAGE_KEY);
-        if (data) {
-            return JSON.parse(data);
+        // Prepare data for insertion (ensure optional fields are present or null if needed by DB)
+        // We assume the table columns match Property interface 1:1 approximately
+        const { error } = await supabase
+            .from('properties')
+            .upsert(properties, {
+                onConflict: 'link',
+                ignoreDuplicates: true // If true, it won't update existing. If we want to update price, set to false.
+                // Let's set to true to ignore duplicates as per request "remove duplicates" - meaning keep old one?
+                // Actually, user said "Last data + current data (remove duplicates)".
+                // Usually scraping means we want latest price.
+                // But for "NEW" tag logic, we need to know which ones were actually inserted.
+                // Supabase upsert return value can tell us that if we use select().
+            });
+
+        if (error) {
+            console.error('Error saving properties to Supabase:', error);
         }
     } catch (error) {
-        console.error('Failed to load properties from storage:', error);
-    }
-    return null;
-}
-
-/**
- * Save properties to localStorage
- */
-export function saveProperties(properties: Property[]): void {
-    try {
-        const data: StoredData = {
-            properties,
-            lastUpdated: new Date().toISOString(),
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (error) {
-        console.error('Failed to save properties to storage:', error);
+        console.error('Unexpected error saving properties:', error);
     }
 }
 
 /**
- * Merge new properties with existing ones, marking new items and removing duplicates
- * Returns the merged list with isNew flags set appropriately
+ * Filter properties to identify which ones are new (not in current list)
+ * purely for UI "NEW" badge logic before saving.
  */
-export function mergeProperties(
+export function identifyNewProperties(
     existingProperties: Property[],
-    newProperties: Property[]
+    incomingProperties: Property[]
 ): Property[] {
-    // Create a map of existing property keys
-    const existingKeys = new Set(existingProperties.map(getPropertyKey));
-
-    // Mark new properties and filter duplicates
-    const processedNew = newProperties
-        .filter(prop => !existingKeys.has(getPropertyKey(prop)))
-        .map(prop => ({ ...prop, isNew: true }));
-
-    // Reset isNew flag on existing properties
-    const existingWithoutNew = existingProperties.map(prop => ({
-        ...prop,
-        isNew: false,
-    }));
-
-    // New properties come first
-    return [...processedNew, ...existingWithoutNew];
+    const existingLinks = new Set(existingProperties.map(p => p.link));
+    return incomingProperties.filter(p => !existingLinks.has(p.link));
 }
 
 /**
- * Get only new properties from the list
+ * Clear all data (optional, for debugging)
  */
-export function getNewProperties(properties: Property[]): Property[] {
-    return properties.filter(prop => prop.isNew);
-}
+export async function clearStorage(): Promise<void> {
+    const { error } = await supabase
+        .from('properties')
+        .delete()
+        .neq('id', 0); // Delete all where ID is not 0 (all rows)
 
-/**
- * Clear all stored data
- */
-export function clearStorage(): void {
-    localStorage.removeItem(STORAGE_KEY);
+    if (error) console.error('Error clearing storage:', error);
 }
