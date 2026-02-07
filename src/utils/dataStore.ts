@@ -54,6 +54,19 @@ function mapToDb(prop: Property): any {
 }
 
 /**
+ * Normalize values for consistent comparison
+ * Removes punctuation, spaces, and case differences.
+ * e.g. "1,935 sqft" -> "1935sqft"
+ * e.g. "3 BHK" -> "3bhk"
+ */
+function normalizeForComparison(value: any): string {
+    if (!value) return '';
+    return String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, ''); // Keep only alphanumeric
+}
+
+/**
  * Load properties from Supabase
  * Returns the list of properties ordered by created_at descending
  */
@@ -78,13 +91,15 @@ export async function loadProperties(): Promise<Property[]> {
 
 /**
  * Save new properties to Supabase
- * STRATEGY WITH AREA CHECK:
+ * STRATEGY WITH ROBUST DUPLICATE CHECK:
  * 1. Reset all 'isnew' to false.
  * 2. Check existing properties (Link + Area).
  * 3. Logic:
  *    - Link New? -> INSERT (isNew=true).
- *    - Link Exists but Area Changed? -> UPDATE (isNew=true).
- *    - Link Exists + Area Same? -> IGNORE (isNew=false from Step 1).
+ *    - Link Exists? 
+ *      -> Compare NORMALIZED Area.
+ *      -> If Different -> UPDATE (isNew=true).
+ *      -> If Same -> IGNORE.
  */
 export async function saveProperties(properties: Property[]): Promise<void> {
     if (properties.length === 0) return;
@@ -125,13 +140,16 @@ export async function saveProperties(properties: Property[]): Promise<void> {
                 toInsert.push({ ...mapped, isnew: true });
             } else {
                 const existingArea = existingMap.get(p.link);
-                // Compare Area (handle potential type mismatches with == or string conversion)
-                // Assuming area is string or number, casting to string helps comparison
-                if (String(existingArea) !== String(p.area)) {
-                    // Case 2: Link exists, but Area changed -> Treat as NEW (Update)
+
+                // ROBUST COMPARISON: Normalize both values
+                const normExisting = normalizeForComparison(existingArea);
+                const normIncoming = normalizeForComparison(p.area);
+
+                if (normExisting !== normIncoming) {
+                    // Case 2: Link exists, but Normalized Area changed -> Treat as NEW (Update)
                     toUpdate.push({ ...mapped, isnew: true });
                 }
-                // Case 3: Link + Area match -> Ignore (Do nothing)
+                // Case 3: Link + Normalized Area match -> Ignore (Old)
             }
         });
 
@@ -144,12 +162,11 @@ export async function saveProperties(properties: Property[]): Promise<void> {
             else console.log(`Inserted ${toInsert.length} properties.`);
         }
 
-        // Execute Updates (Need to loop or use upsert if batch supported for updates)
-        // Upsert works for updates if conflict key matches!
+        // Execute Updates
         if (toUpdate.length > 0) {
             const { error: updateError } = await (supabase as any)
                 .from('properties')
-                .upsert(toUpdate, { onConflict: 'link' }); // Will update since link exists
+                .upsert(toUpdate, { onConflict: 'link' });
             if (updateError) console.error('Error updating changed properties:', updateError);
             else console.log(`Updated ${toUpdate.length} properties with changed area.`);
         }
