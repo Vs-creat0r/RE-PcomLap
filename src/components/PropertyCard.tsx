@@ -25,12 +25,12 @@ const PropertyCard: React.FC<PropertyCardProps> = ({ property, index }) => {
                         fontSize: '0.7rem',
                         fontWeight: 'bold',
                         textTransform: 'uppercase',
-                        color: property.source === '99acres' ? '#3b82f6' : '#10b981',
-                        backgroundColor: property.source === '99acres' ? '#dbeafe' : '#d1fae5',
+                        color: (property.source === '99acres' ? '#3b82f6' : (property.source === 'VitalSpace' ? '#10b981' : '#64748b')),
+                        backgroundColor: (property.source === '99acres' ? '#dbeafe' : (property.source === 'VitalSpace' ? '#d1fae5' : '#f1f5f9')),
                         padding: '0.2rem 0.6rem',
                         borderRadius: '12px'
                     }}>
-                        {property.source}
+                        {property.source || 'Unknown'}
                     </span>
                     {property.isNew && (
                         <span style={{
