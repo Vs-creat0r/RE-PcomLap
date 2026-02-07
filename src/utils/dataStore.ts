@@ -78,10 +78,13 @@ export async function loadProperties(): Promise<Property[]> {
 
 /**
  * Save new properties to Supabase
- * ROBUST STRATEGY:
- * 1. Reset all 'isnew' to false effectively marking everything as "old".
- * 2. Check which incoming properties already exist in DB.
- * 3. Insert ONLY the ones that do NOT exist, marking them 'isnew: true'.
+ * STRATEGY WITH AREA CHECK:
+ * 1. Reset all 'isnew' to false.
+ * 2. Check existing properties (Link + Area).
+ * 3. Logic:
+ *    - Link New? -> INSERT (isNew=true).
+ *    - Link Exists but Area Changed? -> UPDATE (isNew=true).
+ *    - Link Exists + Area Same? -> IGNORE (isNew=false from Step 1).
  */
 export async function saveProperties(properties: Property[]): Promise<void> {
     if (properties.length === 0) return;
@@ -93,15 +96,13 @@ export async function saveProperties(properties: Property[]): Promise<void> {
             .update({ isnew: false })
             .eq('isnew', true);
 
-        if (resetError) {
-            console.error('Error resetting old properties status:', resetError);
-        }
+        if (resetError) console.error('Error resetting old properties status:', resetError);
 
-        // Step 2: Check which links already exist
+        // Step 2: Check which links already exist AND get their area
         const links = properties.map(p => p.link);
         const { data: existingRows, error: checkError } = await (supabase as any)
             .from('properties')
-            .select('link')
+            .select('link, area')
             .in('link', links);
 
         if (checkError) {
@@ -109,30 +110,48 @@ export async function saveProperties(properties: Property[]): Promise<void> {
             return;
         }
 
-        const existingLinks = new Set((existingRows || []).map((r: any) => r.link));
+        // Map: Link -> Area
+        const existingMap = new Map();
+        (existingRows || []).forEach((r: any) => existingMap.set(r.link, r.area));
 
-        // Step 3: Filter out existing properties so we only insert TRULY new ones
-        const newPropertiesToInsert = properties.filter(p => !existingLinks.has(p.link));
+        const toInsert: any[] = [];
+        const toUpdate: any[] = [];
 
-        if (newPropertiesToInsert.length === 0) {
-            console.log('No new properties to add.');
-            return;
+        properties.forEach(p => {
+            const mapped = mapToDb(p);
+
+            if (!existingMap.has(p.link)) {
+                // Case 1: Brand new link
+                toInsert.push({ ...mapped, isnew: true });
+            } else {
+                const existingArea = existingMap.get(p.link);
+                // Compare Area (handle potential type mismatches with == or string conversion)
+                // Assuming area is string or number, casting to string helps comparison
+                if (String(existingArea) !== String(p.area)) {
+                    // Case 2: Link exists, but Area changed -> Treat as NEW (Update)
+                    toUpdate.push({ ...mapped, isnew: true });
+                }
+                // Case 3: Link + Area match -> Ignore (Do nothing)
+            }
+        });
+
+        // Execute Inserts
+        if (toInsert.length > 0) {
+            const { error: insertError } = await (supabase as any)
+                .from('properties')
+                .insert(toInsert);
+            if (insertError) console.error('Error inserting new properties:', insertError);
+            else console.log(`Inserted ${toInsert.length} properties.`);
         }
 
-        // Step 4: Insert the new ones
-        const dbRows = newPropertiesToInsert.map(p => ({
-            ...mapToDb(p),
-            isnew: true // Explicitly set true
-        }));
-
-        const { error: insertError } = await (supabase as any)
-            .from('properties')
-            .insert(dbRows);
-
-        if (insertError) {
-            console.error('Error inserting new properties:', insertError);
-        } else {
-            console.log(`Successfully added ${dbRows.length} new properties.`);
+        // Execute Updates (Need to loop or use upsert if batch supported for updates)
+        // Upsert works for updates if conflict key matches!
+        if (toUpdate.length > 0) {
+            const { error: updateError } = await (supabase as any)
+                .from('properties')
+                .upsert(toUpdate, { onConflict: 'link' }); // Will update since link exists
+            if (updateError) console.error('Error updating changed properties:', updateError);
+            else console.log(`Updated ${toUpdate.length} properties with changed area.`);
         }
 
     } catch (error) {
