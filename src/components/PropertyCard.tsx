@@ -46,7 +46,20 @@ const PropertyCard: React.FC<PropertyCardProps> = ({ property, index }) => {
                         </span>
                     )}
                 </div>
-                <span style={{ fontSize: '0.8rem', color: 'var(--secondary-color)' }}>{property.regDate}</span>
+                <span
+                    title={property.regDate}
+                    style={{
+                        fontSize: '0.8rem',
+                        color: 'var(--secondary-color)',
+                        maxWidth: '140px',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        textAlign: 'right'
+                    }}
+                >
+                    {property.regDate}
+                </span>
             </div>
 
             <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', lineHeight: '1.4' }}>{property.propertyName}</h3>
