@@ -78,46 +78,63 @@ export async function loadProperties(): Promise<Property[]> {
 
 /**
  * Save new properties to Supabase
- * Uses UPSERT to handle duplicates based on the 'link' unique constraint
- */
-/**
- * Save new properties to Supabase
- * Use a transaction-like approach:
- * 1. Mark ALL existing properties as old (isNew = false)
- * 2. Upsert the incoming batch (new ones will be isNew = true)
+ * ROBUST STRATEGY:
+ * 1. Reset all 'isnew' to false effectively marking everything as "old".
+ * 2. Check which incoming properties already exist in DB.
+ * 3. Insert ONLY the ones that do NOT exist, marking them 'isnew: true'.
  */
 export async function saveProperties(properties: Property[]): Promise<void> {
     if (properties.length === 0) return;
 
     try {
         // Step 1: Reset 'isNew' for all existing records
-        // This ensures previous 'NEW' items are no longer marked as new
         const { error: resetError } = await (supabase as any)
             .from('properties')
             .update({ isnew: false })
-            .eq('isnew', true); // Only update those that are currently true
+            .eq('isnew', true);
 
         if (resetError) {
             console.error('Error resetting old properties status:', resetError);
         }
 
-        // Ste 2: Map to DB column format (lowercase)
-        // Ensure incoming properties are set to isNew = true
-        const dbRows = properties.map(p => ({
+        // Step 2: Check which links already exist
+        const links = properties.map(p => p.link);
+        const { data: existingRows, error: checkError } = await (supabase as any)
+            .from('properties')
+            .select('link')
+            .in('link', links);
+
+        if (checkError) {
+            console.error('Error checking existing properties:', checkError);
+            return;
+        }
+
+        const existingLinks = new Set((existingRows || []).map((r: any) => r.link));
+
+        // Step 3: Filter out existing properties so we only insert TRULY new ones
+        const newPropertiesToInsert = properties.filter(p => !existingLinks.has(p.link));
+
+        if (newPropertiesToInsert.length === 0) {
+            console.log('No new properties to add.');
+            return;
+        }
+
+        // Step 4: Insert the new ones
+        const dbRows = newPropertiesToInsert.map(p => ({
             ...mapToDb(p),
-            isnew: true // Explicitly set true for the current batch being processed
+            isnew: true // Explicitly set true
         }));
 
-        const { error } = await (supabase as any)
+        const { error: insertError } = await (supabase as any)
             .from('properties')
-            .upsert(dbRows, {
-                onConflict: 'link',
-                ignoreDuplicates: true // Only insert if link doesn't exist
-            });
+            .insert(dbRows);
 
-        if (error) {
-            console.error('Error saving properties to Supabase:', error);
+        if (insertError) {
+            console.error('Error inserting new properties:', insertError);
+        } else {
+            console.log(`Successfully added ${dbRows.length} new properties.`);
         }
+
     } catch (error) {
         console.error('Unexpected error saving properties:', error);
     }
